@@ -3,3 +3,4 @@ requests==2.31.0
 pyjwt==2.8.0
 yandexcloud==0.29.0
 cryptography==43.0.1
+protobuf==3.20.3
