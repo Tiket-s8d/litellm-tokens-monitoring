@@ -4,8 +4,11 @@ import json
 import requests
 import psycopg2
 import logging
-import jwt
 from datetime import datetime
+import jwt
+from yandexcloud import SDK
+from yandex.cloud.iam.v1.iam_token_service_pb2 import CreateIamTokenRequest
+from yandex.cloud.iam.v1.iam_token_service_pb2_grpc import IamTokenServiceStub
 
 # Настройка логирования
 logging.basicConfig(
@@ -22,33 +25,50 @@ DB_NAME = os.getenv('DB_NAME', 'litellm-users')
 DB_USER = os.getenv('DB_USER', 'your_username')
 DB_PASSWORD = os.getenv('DB_PASSWORD', 'your_password')
 YANDEX_FOLDER_ID = os.getenv('YANDEX_FOLDER_ID', 'your_folder_id')
-YANDEX_ACCESS_KEY = os.getenv('YANDEX_ACCESS_KEY', 'your_access_key')
-YANDEX_SECRET_KEY = os.getenv('YANDEX_SECRET_KEY', 'your_secret_key')
 KEY_NAME = os.getenv('KEY_NAME', 'test')
-YANDEX_SERVICE_ACCOUNT_ID = os.getenv('YANDEX_SERVICE_ACCOUNT_ID', 'your_service_account_id')
 
 # Yandex Monitoring API endpoint
 METRICS_URL = 'https://monitoring.api.cloud.yandex.net/monitoring/v2/data/write'
 
-def get_iam_token(access_key, secret_key, service_account_id):
+def create_jwt():
     try:
-        # Формируем JWT
+        with open('/app/key.json') as f:
+            key_data = json.load(f)
         now = int(time.time())
         payload = {
             'aud': 'https://iam.api.cloud.yandex.net/iam/v1/tokens',
-            'iss': service_account_id,
+            'iss': key_data['service_account_id'],
             'iat': now,
             'exp': now + 3600
         }
-        # Используем secret_key для подписи JWT
-        encoded_jwt = jwt.encode(payload, secret_key, algorithm='HS256')
-        # Запрос IAM-токена
-        response = requests.post(
-            'https://iam.api.cloud.yandex.net/iam/v1/tokens',
-            json={'jwt': encoded_jwt}
+        encoded_jwt = jwt.encode(
+            payload,
+            key_data['private_key'],
+            algorithm='PS256',
+            headers={'kid': key_data['id']}
         )
-        response.raise_for_status()
-        return response.json().get('iamToken')
+        return encoded_jwt
+    except Exception as e:
+        logger.error(f"Error creating JWT: {e}")
+        return None
+
+def get_iam_token():
+    try:
+        with open('/app/key.json') as f:
+            key_data = json.load(f)
+        sa_key = {
+            "id": key_data['id'],
+            "service_account_id": key_data['service_account_id'],
+            "private_key": key_data['private_key']
+        }
+        jwt = create_jwt()
+        if not jwt:
+            return None
+        sdk = SDK(service_account_key=sa_key)
+        iam_service = sdk.client(IamTokenServiceStub)
+        iam_token = iam_service.Create(CreateIamTokenRequest(jwt=jwt))
+        logger.info("IAM token obtained successfully")
+        return iam_token.iam_token
     except Exception as e:
         logger.error(f"Error getting IAM token: {e}")
         return None
@@ -94,10 +114,7 @@ def send_to_yandex_monitoring(spend):
         logger.warning("No spend value to send to Yandex Monitoring")
         return
 
-    access_key = os.getenv('YANDEX_ACCESS_KEY')
-    secret_key = os.getenv('YANDEX_SECRET_KEY')
-    service_account_id = os.getenv('YANDEX_SERVICE_ACCOUNT_ID')
-    iam_token = get_iam_token(access_key, secret_key, service_account_id)
+    iam_token = get_iam_token()
     if not iam_token:
         logger.error("Failed to get IAM token, skipping metrics send")
         return
