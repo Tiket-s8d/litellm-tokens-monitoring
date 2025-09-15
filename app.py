@@ -4,8 +4,8 @@ import json
 import requests
 import psycopg2
 import logging
-import boto3
 from datetime import datetime
+from requests_aws4auth import AWS4Auth
 
 # Настройка логирования
 logging.basicConfig(
@@ -31,16 +31,22 @@ METRICS_URL = 'https://monitoring.api.cloud.yandex.net/monitoring/v2/data/write'
 
 def get_iam_token(access_key, secret_key):
     try:
-        session = boto3.session.Session()
-        iam = session.client(
-            service_name='iam',
-            endpoint_url='https://iam.api.cloud.yandex.net',
-            aws_access_key_id=access_key,
-            aws_secret_access_key=secret_key,
-            region_name='ru-central1'
+        # Создаем объект AWS4Auth для подписи запроса
+        auth = AWS4Auth(
+            access_key,
+            secret_key,
+            'ru-central1',
+            'iam',
+            service='iam'
         )
-        response = iam.create_iam_token()
-        return response['iamToken']
+        # Запрос к IAM API для получения токена
+        response = requests.post(
+            'https://iam.api.cloud.yandex.net/iam/v1/tokens',
+            json={'yandexPassportOauthToken': ''},  # Пустой OAuth-токен, так как используем access_key
+            auth=auth
+        )
+        response.raise_for_status()
+        return response.json().get('iamToken')
     except Exception as e:
         logger.error(f"Error getting IAM token: {e}")
         return None
