@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    environment:
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - YANDEX_FOLDER_ID=${YANDEX_FOLDER_ID}
+      - YANDEX_IAM_TOKEN=${YANDEX_IAM_TOKEN}
+      - KEY_NAME=${KEY_NAME}
+    restart: unless-stopped
