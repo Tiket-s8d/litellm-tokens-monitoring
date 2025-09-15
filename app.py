@@ -4,8 +4,8 @@ import json
 import requests
 import psycopg2
 import logging
+import jwt
 from datetime import datetime
-from requests_aws4auth import AWS4Auth
 
 # Настройка логирования
 logging.basicConfig(
@@ -25,25 +25,27 @@ YANDEX_FOLDER_ID = os.getenv('YANDEX_FOLDER_ID', 'your_folder_id')
 YANDEX_ACCESS_KEY = os.getenv('YANDEX_ACCESS_KEY', 'your_access_key')
 YANDEX_SECRET_KEY = os.getenv('YANDEX_SECRET_KEY', 'your_secret_key')
 KEY_NAME = os.getenv('KEY_NAME', 'test')
+YANDEX_SERVICE_ACCOUNT_ID = os.getenv('YANDEX_SERVICE_ACCOUNT_ID', 'your_service_account_id')
 
 # Yandex Monitoring API endpoint
 METRICS_URL = 'https://monitoring.api.cloud.yandex.net/monitoring/v2/data/write'
 
-def get_iam_token(access_key, secret_key):
+def get_iam_token(access_key, secret_key, service_account_id):
     try:
-        # Создаем объект AWS4Auth для подписи запроса
-        auth = AWS4Auth(
-            access_key,
-            secret_key,
-            'ru-central1',
-            'iam',
-            service='iam'
-        )
-        # Запрос к IAM API для получения токена
+        # Формируем JWT
+        now = int(time.time())
+        payload = {
+            'aud': 'https://iam.api.cloud.yandex.net/iam/v1/tokens',
+            'iss': service_account_id,
+            'iat': now,
+            'exp': now + 3600
+        }
+        # Используем secret_key для подписи JWT
+        encoded_jwt = jwt.encode(payload, secret_key, algorithm='HS256')
+        # Запрос IAM-токена
         response = requests.post(
             'https://iam.api.cloud.yandex.net/iam/v1/tokens',
-            json={'yandexPassportOauthToken': ''},  # Пустой OAuth-токен, так как используем access_key
-            auth=auth
+            json={'jwt': encoded_jwt}
         )
         response.raise_for_status()
         return response.json().get('iamToken')
@@ -94,7 +96,8 @@ def send_to_yandex_monitoring(spend):
 
     access_key = os.getenv('YANDEX_ACCESS_KEY')
     secret_key = os.getenv('YANDEX_SECRET_KEY')
-    iam_token = get_iam_token(access_key, secret_key)
+    service_account_id = os.getenv('YANDEX_SERVICE_ACCOUNT_ID')
+    iam_token = get_iam_token(access_key, secret_key, service_account_id)
     if not iam_token:
         logger.error("Failed to get IAM token, skipping metrics send")
         return
